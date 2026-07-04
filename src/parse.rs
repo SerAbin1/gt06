@@ -285,9 +285,8 @@ mod tests {
 
     #[test]
     fn parses_standard_location() {
-        let pkt = from_hex(
-            "78781f1218060f0a1e2d87026bf998097afcac2d347b01940a138801e24000020c950d0a",
-        );
+        let pkt =
+            from_hex("78781f1218060f0a1e2d87026bf998097afcac2d347b01940a138801e24000020c950d0a");
         let msg = parse_packet(&pkt).unwrap();
         match msg {
             Message::Location(loc) => {

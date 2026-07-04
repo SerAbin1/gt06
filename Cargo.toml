@@ -3,9 +3,11 @@ name = "gt06"
 version = "0.1.0"
 edition = "2021"
 description = "Parser and stream decoder for the GT06 GPS tracker protocol"
-license = "MIT OR Apache-2.0"
-repository = "https://github.com/SerAbinU1/gt06"
+license = "MIT"
+repository = "https://github.com/SerAbin1/gt06"
+homepage = "https://github.com/SerAbin1/gt06"
+readme = "README.md"
 keywords = ["gps", "gt06", "tracker", "protocol", "parser"]
-categories = ["parser-implementations", "network-programming"]
+categories = ["parser-implementations", "embedded", "network-programming"]
 
 [dependencies]
