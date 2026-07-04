@@ -1,0 +1,11 @@
+[package]
+name = "gt06"
+version = "0.1.0"
+edition = "2021"
+description = "Parser and stream decoder for the GT06 GPS tracker protocol"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/SerAbinU1/gt06"
+keywords = ["gps", "gt06", "tracker", "protocol", "parser"]
+categories = ["parser-implementations", "network-programming"]
+
+[dependencies]
