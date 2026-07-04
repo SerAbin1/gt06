@@ -6,6 +6,9 @@ use crate::error::Error;
 use crate::message::Message;
 use crate::parse;
 
+const START_MARKER: [u8; 2] = [0x78, 0x78];
+const END_MARKER: [u8; 2] = [0x0d, 0x0a];
+
 /// Buffers raw bytes from a GT06 connection and reassembles them into
 /// parsed messages, tracking the IMEI seen on a prior login so it can be
 /// backfilled onto later location/status/alarm messages on the same
@@ -29,9 +32,78 @@ impl Decoder {
     /// Feeds newly-received bytes into the decoder and returns any complete
     /// packets found, in order. An incomplete trailing packet is buffered
     /// and completed on a later call rather than discarded.
-    pub fn push(&mut self, _data: &[u8]) -> Vec<Result<Message, Error>> {
-        todo!()
+    pub fn push(&mut self, data: &[u8]) -> Vec<Result<Message, Error>> {
+        self.buf.extend_from_slice(data);
+
+        let mut results = Vec::new();
+        let mut pos = 0;
+
+        loop {
+            let Some(offset) = find_start_marker(&self.buf[pos..]) else {
+                // No start marker in the remaining bytes. Keep a dangling
+                // trailing 0x78 around in case it's the first half of a
+                // marker split across this push and the next one.
+                pos = if self.buf.last() == Some(&0x78) {
+                    self.buf.len() - 1
+                } else {
+                    self.buf.len()
+                };
+                break;
+            };
+            let start = pos + offset;
+
+            if start + 3 > self.buf.len() {
+                // Have the start marker but not the length byte yet.
+                pos = start;
+                break;
+            }
+
+            let length = self.buf[start + 2] as usize;
+            let total_len = length + 5;
+
+            if start + total_len > self.buf.len() {
+                // Framed but incomplete; wait for the rest to arrive rather
+                // than discarding the start marker (unlike a naive port of
+                // the reference parser, which drops a byte here and can
+                // never recover a packet split across two reads).
+                pos = start;
+                break;
+            }
+
+            let packet = &self.buf[start..start + total_len];
+            if packet[packet.len() - 2..] != END_MARKER {
+                // Not actually a valid frame; treat the marker as
+                // coincidental and resync one byte forward.
+                pos = start + 1;
+                continue;
+            }
+
+            match parse::parse_packet(packet) {
+                Ok(mut message) => {
+                    self.apply_session_state(&mut message);
+                    results.push(Ok(message));
+                }
+                Err(err) => results.push(Err(err)),
+            }
+            pos = start + total_len;
+        }
+
+        self.buf.drain(..pos);
+        results
     }
+
+    fn apply_session_state(&mut self, message: &mut Message) {
+        match message {
+            Message::Login(login) => self.imei = Some(login.imei.clone()),
+            Message::Location(location) => location.imei = self.imei.clone(),
+            Message::Status(status) => status.imei = self.imei.clone(),
+            Message::Alarm(alarm) => alarm.imei = self.imei.clone(),
+        }
+    }
+}
+
+fn find_start_marker(buf: &[u8]) -> Option<usize> {
+    buf.windows(2).position(|window| window == START_MARKER)
 }
 
 #[cfg(test)]
