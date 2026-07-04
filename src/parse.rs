@@ -17,36 +17,246 @@ const MIN_PACKET_LEN: usize = 10;
 /// always `None` here, since a standalone packet carries no connection
 /// state — use [`crate::Decoder`] if you need it backfilled from an
 /// earlier login.
-pub fn parse_packet(_data: &[u8]) -> Result<Message, Error> {
-    todo!()
+pub fn parse_packet(data: &[u8]) -> Result<Message, Error> {
+    if data.len() < MIN_PACKET_LEN {
+        return Err(Error::TooShort);
+    }
+    if data[0..2] != START_MARKER {
+        return Err(Error::MissingStartMarker);
+    }
+    if data[data.len() - 2..] != END_MARKER {
+        return Err(Error::MissingEndMarker);
+    }
+
+    let received_crc = u16::from_be_bytes([data[data.len() - 4], data[data.len() - 3]]);
+    let computed_crc = crc::checksum(&data[2..data.len() - 4]);
+    if received_crc != computed_crc {
+        return Err(Error::CrcMismatch);
+    }
+
+    match data[3] {
+        0x01 => parse_login(data).map(Message::Login),
+        0x12 => parse_standard_location(data).map(Message::Location),
+        0x22 => parse_extended_location(data).map(Message::Location),
+        0x13 => parse_status(data).map(Message::Status),
+        0x16 => parse_alarm(data).map(Message::Alarm),
+        other => Err(Error::UnknownProtocol(other)),
+    }
 }
 
-fn parse_login(_data: &[u8]) -> Result<Login, Error> {
-    todo!()
+fn parse_login(data: &[u8]) -> Result<Login, Error> {
+    let packet_length = data[2];
+    let serial_offset = match packet_length {
+        0x0d => 12,
+        0x11 => 16,
+        _ => return Err(Error::InvalidLogin),
+    };
+    if data.len() < serial_offset + 2 {
+        return Err(Error::InvalidLogin);
+    }
+
+    // IMEI is 8 bytes of BCD digits, decoded as a 16-digit string and then
+    // normalized to 15 digits (devices pad with a leading zero nibble).
+    let mut digits = String::with_capacity(16);
+    for &byte in &data[4..12] {
+        digits.push(char::from_digit((byte >> 4) as u32, 16).unwrap());
+        digits.push(char::from_digit((byte & 0x0f) as u32, 16).unwrap());
+    }
+    let imei = if let Some(stripped) = digits.strip_prefix('0') {
+        stripped.to_string()
+    } else {
+        digits[..15].to_string()
+    };
+
+    let serial_number = u16::from_be_bytes([data[serial_offset], data[serial_offset + 1]]);
+
+    Ok(Login {
+        imei,
+        serial_number,
+    })
 }
 
-fn parse_common_fix(_data: &[u8]) -> Fix {
-    todo!()
+/// Decodes the GPS fix fields shared by standard location (`0x12`) and alarm
+/// (`0x16`) packets, which use an identical layout for bytes 4..30.
+fn parse_common_fix(data: &[u8]) -> Fix {
+    let time = datetime::unix_timestamp(data[4], data[5], data[6], data[7], data[8], data[9]);
+    let quantity = data[10];
+    let lat_raw = u32::from_be_bytes([data[11], data[12], data[13], data[14]]);
+    let lon_raw = u32::from_be_bytes([data[15], data[16], data[17], data[18]]);
+    let speed_kmh = data[19];
+    let course_raw = u16::from_be_bytes([data[20], data[21]]);
+    let mcc = u16::from_be_bytes([data[22], data[23]]);
+    let mnc = data[24];
+    let lac = u16::from_be_bytes([data[25], data[26]]);
+    let cell_id = ((data[27] as u32) << 16) | ((data[28] as u32) << 8) | data[29] as u32;
+
+    let (latitude, longitude, course, real_time_gps, gps_positioned) =
+        decode_course_and_coords(lat_raw, lon_raw, course_raw);
+
+    Fix {
+        time,
+        satellites: Some((quantity & 0xf0) >> 4),
+        satellites_active: Some(quantity & 0x0f),
+        latitude,
+        longitude,
+        speed_kmh,
+        course,
+        real_time_gps,
+        gps_positioned,
+        mcc: Some(mcc),
+        mnc: Some(mnc),
+        lac: Some(lac),
+        cell_id: Some(cell_id),
+    }
 }
 
-fn parse_standard_location(_data: &[u8]) -> Result<Location, Error> {
-    todo!()
+/// Decodes the signed lat/lon (in degrees) and course status flags from the
+/// raw GT06 fields. Latitude/longitude sign is carried in the course field.
+fn decode_course_and_coords(
+    lat_raw: u32,
+    lon_raw: u32,
+    course_raw: u16,
+) -> (f64, f64, u16, bool, bool) {
+    let real_time_gps = course_raw & 0x2000 != 0;
+    let gps_positioned = course_raw & 0x1000 != 0;
+    let west = course_raw & 0x0800 != 0;
+    let north = course_raw & 0x0400 != 0;
+    let course = course_raw & 0x03ff;
+
+    let mut latitude = lat_raw as f64 / 60.0 / 30000.0;
+    if !north {
+        latitude = -latitude;
+    }
+    let mut longitude = lon_raw as f64 / 60.0 / 30000.0;
+    if west {
+        longitude = -longitude;
+    }
+    latitude = (latitude * 1_000_000.0).round() / 1_000_000.0;
+    longitude = (longitude * 1_000_000.0).round() / 1_000_000.0;
+
+    (latitude, longitude, course, real_time_gps, gps_positioned)
 }
 
-fn parse_extended_location(_data: &[u8]) -> Result<Location, Error> {
-    todo!()
+fn parse_standard_location(data: &[u8]) -> Result<Location, Error> {
+    if data.len() < 35 {
+        return Err(Error::InvalidLocation);
+    }
+    Ok(Location {
+        imei: None,
+        fix: parse_common_fix(data),
+        extended: false,
+        serial_number: tail_serial(data),
+    })
 }
 
-fn parse_status(_data: &[u8]) -> Result<Status, Error> {
-    todo!()
+/// Extended (`0x22`) location packets don't carry a definitive published
+/// layout; this mirrors the reference implementation's length-based
+/// heuristic. Cell/satellite fields are never available for these packets.
+fn parse_extended_location(data: &[u8]) -> Result<Location, Error> {
+    if data.len() < 25 {
+        return Err(Error::InvalidLocation);
+    }
+
+    let time = datetime::unix_timestamp(data[4], data[5], data[6], data[7], data[8], data[9]);
+
+    let (lat_raw, lon_raw, speed_kmh, course_raw) = if data.len() >= 35 {
+        (
+            u32::from_be_bytes([data[11], data[12], data[13], data[14]]),
+            u32::from_be_bytes([data[15], data[16], data[17], data[18]]),
+            data[19],
+            u16::from_be_bytes([data[20], data[21]]),
+        )
+    } else {
+        (
+            u32::from_be_bytes([data[10], data[11], data[12], data[13]]),
+            u32::from_be_bytes([data[14], data[15], data[16], data[17]]),
+            data[18],
+            u16::from_be_bytes([data[19], data[20]]),
+        )
+    };
+
+    let (latitude, longitude, course, real_time_gps, gps_positioned) =
+        decode_course_and_coords(lat_raw, lon_raw, course_raw);
+
+    Ok(Location {
+        imei: None,
+        fix: Fix {
+            time,
+            satellites: None,
+            satellites_active: None,
+            latitude,
+            longitude,
+            speed_kmh,
+            course,
+            real_time_gps,
+            gps_positioned,
+            mcc: None,
+            mnc: None,
+            lac: None,
+            cell_id: None,
+        },
+        extended: true,
+        serial_number: tail_serial(data),
+    })
 }
 
-fn parse_alarm(_data: &[u8]) -> Result<Alarm, Error> {
-    todo!()
+fn parse_status(data: &[u8]) -> Result<Status, Error> {
+    if data.len() < 15 {
+        return Err(Error::InvalidStatus);
+    }
+    let terminal_info = data[4];
+    let voltage = data[5];
+    let gsm = data[6];
+
+    Ok(Status {
+        imei: None,
+        flags: StatusFlags {
+            defended: terminal_info & 0x01 != 0,
+            ignition: terminal_info & 0x02 != 0,
+            charging: terminal_info & 0x04 != 0,
+            alarm: TerminalAlarm::from((terminal_info & 0x38) >> 3),
+            gps_tracking: terminal_info & 0x40 != 0,
+            relay_state: terminal_info & 0x80 != 0,
+        },
+        voltage_level: VoltageLevel::from(voltage),
+        gsm_signal: GsmSignal::from(gsm),
+        serial_number: tail_serial(data),
+    })
 }
 
-fn tail_serial(_data: &[u8]) -> u16 {
-    todo!()
+fn parse_alarm(data: &[u8]) -> Result<Alarm, Error> {
+    if data.len() < 40 {
+        return Err(Error::InvalidAlarm);
+    }
+    let terminal_info = data[30];
+    let voltage = data[31];
+    let gsm = data[32];
+    let alarm_type_raw = data[33];
+    let language_raw = data[34];
+
+    Ok(Alarm {
+        imei: None,
+        fix: parse_common_fix(data),
+        terminal_info: AlarmTerminalInfo {
+            activated: terminal_info & 0x01 != 0,
+            acc_high: terminal_info & 0x02 != 0,
+            charging: terminal_info & 0x04 != 0,
+            alarm: TerminalAlarm::from((terminal_info & 0x38) >> 3),
+            gps_tracking: terminal_info & 0x40 != 0,
+            oil_electric_disconnected: terminal_info & 0x80 != 0,
+        },
+        voltage_level: VoltageLevel::from(voltage),
+        gsm_signal: GsmSignal::from(gsm),
+        alarm: AlarmEvent::from(alarm_type_raw),
+        language: Language::from(language_raw),
+        serial_number: tail_serial(data),
+    })
+}
+
+/// The serial number always sits in the 2 bytes immediately before the CRC.
+fn tail_serial(data: &[u8]) -> u16 {
+    let len = data.len();
+    u16::from_be_bytes([data[len - 6], data[len - 5]])
 }
 
 #[cfg(test)]
