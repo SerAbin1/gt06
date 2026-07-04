@@ -69,4 +69,15 @@ mod tests {
     fn empty_input_is_ffff_negated() {
         assert_eq!(checksum(&[]), 0x0000);
     }
+
+    #[test]
+    fn matches_standard_crc_input() {
+        // CRC-16/X-25 (aka CRC-16/IBM-SDLC): poly=0x1021, init=0xFFFF, refin=true,
+        // refout=true, xorout=0xFFFF.
+        // Params/check value: https://reveng.sourceforge.io/crc-catalogue/16.htm ("CRC-16/IBM-SDLC")
+        // Definition of "check" (CRC of ASCII "123456789"): https://reveng.sourceforge.io/readme.htm
+        // Verified: CRC("123456789") == 0x906E
+        let data = [0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39];
+        assert_eq!(checksum(&data), 0x906E);
+    }
 }
