@@ -1,7 +1,7 @@
 [package]
 name = "gt06"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 description = "Parser and stream decoder for the GT06 GPS tracker protocol"
 license = "MIT"
 repository = "https://github.com/SerAbin1/gt06"
