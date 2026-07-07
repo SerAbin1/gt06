@@ -9,6 +9,25 @@ pub enum Message {
     Alarm(Alarm),
 }
 
+impl Message {
+    /// Builds the ack packet the device expects in reply to this message, if
+    /// any. `None` for message types the protocol doesn't require an ack for
+    /// (location, alarm).
+    pub fn ack_bytes(&self) -> Option<[u8; 10]> {
+        match self {
+            Message::Login(login) => Some(crate::response::build_ack(0x01, login.serial_number)),
+            Message::Status(status) => Some(crate::response::build_ack(0x13, status.serial_number)),
+            Message::Location(_) | Message::Alarm(_) => None,
+        }
+    }
+
+    /// `true` if this message expects an ack reply. Equivalent to
+    /// `self.ack_bytes().is_some()`.
+    pub fn expects_ack(&self) -> bool {
+        self.ack_bytes().is_some()
+    }
+}
+
 /// Login message (protocol `0x01`). The device sends this once per
 /// connection to identify itself; the server must ack it.
 #[derive(Debug, Clone, PartialEq, Eq)]

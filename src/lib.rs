@@ -9,10 +9,10 @@
 //! framed packet.
 //!
 //! Login and status messages expect an acknowledgement written back to the
-//! device; build one with [`build_ack`].
+//! device; check [`Message::ack_bytes`] after parsing.
 //!
 //! ```
-//! use gt06::{build_ack, Decoder, Message};
+//! use gt06::{Decoder, Message};
 //!
 //! # let raw_bytes_from_socket: [u8; 18] = [
 //! #     0x78, 0x78, 0x0d, 0x01, 0x03, 0x56, 0x93, 0x80, 0x35, 0x64, 0x38, 0x09,
@@ -21,13 +21,15 @@
 //! let mut decoder = Decoder::new();
 //! for result in decoder.push(&raw_bytes_from_socket) {
 //!     match result {
-//!         Ok(Message::Login(login)) => {
-//!             println!("device {} connected", login.imei);
-//!             let ack = build_ack(0x01, login.serial_number);
-//!             // socket.write_all(&ack)?;
-//!             assert_eq!(ack[3], 0x01);
+//!         Ok(message) => {
+//!             if let Message::Login(login) = &message {
+//!                 println!("device {} connected", login.imei);
+//!             }
+//!             if let Some(ack) = message.ack_bytes() {
+//!                 // socket.write_all(&ack)?;
+//!                 assert_eq!(ack[3], 0x01);
+//!             }
 //!         }
-//!         Ok(other) => println!("{other:?}"),
 //!         Err(err) => eprintln!("bad packet: {err}"),
 //!     }
 //! }
