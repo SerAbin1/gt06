@@ -7,7 +7,6 @@ use crate::message::Message;
 use crate::parse;
 
 const START_MARKER: [u8; 2] = [0x78, 0x78];
-const END_MARKER: [u8; 2] = [0x0d, 0x0a];
 
 /// Buffers raw bytes from a GT06 connection and reassembles them into
 /// parsed messages, tracking the IMEI seen on a prior login so it can be
@@ -62,21 +61,12 @@ impl Decoder {
             let total_len = length + 5;
 
             if start + total_len > self.buf.len() {
-                // Framed but incomplete; wait for the rest to arrive rather
-                // than discarding the start marker (unlike a naive port of
-                // the reference parser, which drops a byte here and can
-                // never recover a packet split across two reads).
+                // Framed but incomplete; wait for the rest to arrive
                 pos = start;
                 break;
             }
 
             let packet = &self.buf[start..start + total_len];
-            if packet[packet.len() - 2..] != END_MARKER {
-                // Not actually a valid frame; treat the marker as
-                // coincidental and resync one byte forward.
-                pos = start + 1;
-                continue;
-            }
 
             match parse::parse_packet(packet) {
                 Ok(mut message) => {
