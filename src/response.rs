@@ -3,8 +3,8 @@
 
 use crate::crc;
 
-const START_BIT: [u8; 2] = [0x78, 0x78];
-const END_BIT: [u8; 2] = [0x0d, 0x0a];
+const START_MARKER: [u8; 2] = [0x78, 0x78];
+const END_MARKER: [u8; 2] = [0x0d, 0x0a];
 
 /// Builds the 10-byte ack packet for the given protocol number and serial.
 pub fn build_ack(protocol: u8, serial: u16) -> [u8; 10] {
@@ -13,12 +13,12 @@ pub fn build_ack(protocol: u8, serial: u16) -> [u8; 10] {
     let crc = crc::checksum(&crc_input).to_be_bytes();
 
     let mut packet = [0u8; 10];
-    packet[0..2].copy_from_slice(&START_BIT);
+    packet[0..2].copy_from_slice(&START_MARKER);
     packet[2] = 0x05;
     packet[3] = protocol;
     packet[4..6].copy_from_slice(&serial_bytes);
     packet[6..8].copy_from_slice(&crc);
-    packet[8..10].copy_from_slice(&END_BIT);
+    packet[8..10].copy_from_slice(&END_MARKER);
     packet
 }
 
