@@ -1,7 +1,11 @@
 use std::fmt;
 
 /// Errors that can occur while parsing a GT06 packet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+///
+/// Non-exhaustive: new variants may be added as more protocol numbers are
+/// supported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum Error {
     /// The buffer is too short to contain a valid packet.
     TooShort,

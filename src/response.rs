@@ -7,6 +7,17 @@ const START_MARKER: [u8; 2] = [0x78, 0x78];
 const END_MARKER: [u8; 2] = [0x0d, 0x0a];
 
 /// Builds the 10-byte ack packet for the given protocol number and serial.
+///
+/// Prefer [`Message::ack_bytes`](crate::Message::ack_bytes) for parsed
+/// messages; this is for acking packets this crate doesn't parse.
+///
+/// ```
+/// // Login ack for serial number 1.
+/// assert_eq!(
+///     gt06::build_ack(0x01, 1),
+///     [0x78, 0x78, 0x05, 0x01, 0x00, 0x01, 0xd9, 0xdc, 0x0d, 0x0a],
+/// );
+/// ```
 pub fn build_ack(protocol: u8, serial: u16) -> [u8; 10] {
     let serial_bytes = serial.to_be_bytes();
     let crc_input = [0x05, protocol, serial_bytes[0], serial_bytes[1]];

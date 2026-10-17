@@ -41,7 +41,7 @@ Or add it to `Cargo.toml`:
 
 ```toml
 [dependencies]
-gt06 = "0.2"
+gt06 = "0.4"
 ```
 
 ## Quick start
@@ -201,6 +201,8 @@ match message {
         println!("alarm: {:?}", alarm.alarm);
         println!("at {}, {}", alarm.fix.latitude, alarm.fix.longitude);
     }
+    // `Message` is non-exhaustive; new message types may be added.
+    _ => {}
 }
 ```
 

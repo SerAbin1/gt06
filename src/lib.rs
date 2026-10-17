@@ -35,6 +35,8 @@
 //! }
 //! ```
 
+#![warn(missing_docs)]
+
 mod crc;
 mod datetime;
 mod error;

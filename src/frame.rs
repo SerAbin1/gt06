@@ -12,13 +12,33 @@ const START_MARKER: [u8; 2] = [0x78, 0x78];
 /// parsed messages, tracking the IMEI seen on a prior login so it can be
 /// backfilled onto later location/status/alarm messages on the same
 /// connection.
-#[derive(Debug, Default)]
+///
+/// Use one `Decoder` per connection.
+///
+/// ```
+/// use gt06::{Decoder, Message};
+///
+/// let login = [
+///     0x78, 0x78, 0x0d, 0x01, 0x03, 0x56, 0x93, 0x80, 0x35, 0x64, 0x38, 0x09,
+///     0x00, 0x01, 0x91, 0x1f, 0x0d, 0x0a,
+/// ];
+/// let mut decoder = Decoder::new();
+///
+/// // A packet split across two reads is buffered until it's complete.
+/// assert!(decoder.push(&login[..7]).is_empty());
+/// let results = decoder.push(&login[7..]);
+///
+/// assert!(matches!(results[..], [Ok(Message::Login(_))]));
+/// assert_eq!(decoder.imei(), Some("356938035643809"));
+/// ```
+#[derive(Debug, Clone, Default)]
 pub struct Decoder {
     buf: Vec<u8>,
     imei: Option<String>,
 }
 
 impl Decoder {
+    /// Creates an empty decoder with no buffered bytes and no IMEI.
     pub fn new() -> Self {
         Self::default()
     }
@@ -31,6 +51,12 @@ impl Decoder {
     /// Feeds newly-received bytes into the decoder and returns any complete
     /// packets found, in order. An incomplete trailing packet is buffered
     /// and completed on a later call rather than discarded.
+    ///
+    /// # Errors
+    ///
+    /// Each framed packet that fails to parse yields an `Err` in its slot;
+    /// see [`parse_packet`](crate::parse_packet) for the cases. A bad packet
+    /// doesn't stop decoding: the decoder skips past it and keeps going.
     pub fn push(&mut self, data: &[u8]) -> Vec<Result<Message, Error>> {
         self.buf.extend_from_slice(data);
 

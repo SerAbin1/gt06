@@ -17,6 +17,32 @@ const MIN_PACKET_LEN: usize = 10;
 /// always `None` here, since a standalone packet carries no connection
 /// state — use [`crate::Decoder`] if you need it backfilled from an
 /// earlier login.
+///
+/// # Errors
+///
+/// - [`Error::TooShort`], [`Error::MissingStartMarker`],
+///   [`Error::MissingEndMarker`] if `data` isn't a framed packet.
+/// - [`Error::CrcMismatch`] if the checksum doesn't match.
+/// - [`Error::UnknownProtocol`] for protocol numbers this crate doesn't parse.
+/// - [`Error::InvalidLogin`], [`Error::InvalidLocation`],
+///   [`Error::InvalidStatus`], [`Error::InvalidAlarm`] if the packet is too
+///   short for its protocol.
+///
+/// # Examples
+///
+/// ```
+/// use gt06::{parse_packet, Message};
+///
+/// let packet = [
+///     0x78, 0x78, 0x0d, 0x01, 0x03, 0x56, 0x93, 0x80, 0x35, 0x64, 0x38, 0x09,
+///     0x00, 0x01, 0x91, 0x1f, 0x0d, 0x0a,
+/// ];
+/// match parse_packet(&packet)? {
+///     Message::Login(login) => assert_eq!(login.imei, "356938035643809"),
+///     other => panic!("expected a login, got {other:?}"),
+/// }
+/// # Ok::<(), gt06::Error>(())
+/// ```
 pub fn parse_packet(data: &[u8]) -> Result<Message, Error> {
     if data.len() < MIN_PACKET_LEN {
         return Err(Error::TooShort);
